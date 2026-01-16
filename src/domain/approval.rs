@@ -70,6 +70,7 @@ impl FlowProcess {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApprovalStep {
     pub seq: i32,
+    pub name: String, // Step name (e.g. "Manager Approval")
     pub approver_id: Uuid,
     pub status: String, // pending, approved, rejected
     pub timestamp: Option<DateTime<Utc>>,

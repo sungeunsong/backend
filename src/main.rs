@@ -23,17 +23,39 @@ async fn main() {
     println!("✅ Connection to Database successful!");
 
     // 3. Router 설정
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any);
+
     let app = Router::new()
         .route("/", get(root))
+        // Approval Routes
         .route("/approvals", post(create_approval).get(list_approvals))
         .route("/approvals/{id}", get(get_approval))
         .route("/approvals/{id}/action", post(process_approval))
+        // Template Routes
+        .route(
+            "/templates",
+            post(backend::handlers::template_handler::create_template)
+                .get(backend::handlers::template_handler::list_templates),
+        )
+        .route(
+            "/templates/{id}",
+            get(backend::handlers::template_handler::get_template),
+        )
+        .route(
+            "/approvals/from-template/{template_id}",
+            post(backend::handlers::template_handler::create_approval_from_template),
+        )
+        .layer(cors) // CORS 미들웨어 추가
         .with_state(pool);
 
     // 4. 서버 시작
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
     println!("🚀 Server listening on {}", addr);
     let listener = TcpListener::bind(addr).await.unwrap();
+    println!("Routes initialized. Try POST/GET /approvals");
     axum::serve(listener, app).await.unwrap();
 }
 
