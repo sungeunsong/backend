@@ -1,4 +1,4 @@
-use crate::domain::approval::{ApprovalRequest, FlowProcess};
+use crate::domain::approval::{ApprovalLog, ApprovalRequest, FlowProcess};
 use sqlx::types::Json;
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
@@ -12,9 +12,7 @@ impl ApprovalRepository {
         Self { pool }
     }
 
-    // [Rust Guide]
-    // async fn: 비동기 함수입니다. DB I/O 같은 느린 작업은 비동기로 처리하여 서버 성능을 높입니다.
-    // Result<ApprovalRequest>: 성공하면 ApprovalRequest를 반환하고, 실패하면 Error를 반환합니다.
+    // ... existing methods ...
     pub async fn create(
         &self,
         title: String,
@@ -22,8 +20,6 @@ impl ApprovalRepository {
         form_data: serde_json::Value,
         flow_process: FlowProcess,
     ) -> Result<ApprovalRequest> {
-        // [Fix] sqlx::query_as!에서 JSONB 타입을 Rust 구조체로 매핑할 때 정확한 타입을 명시해야 합니다.
-        // as "field: Type" 문법을 사용합니다.
         let request = sqlx::query_as!(
             ApprovalRequest,
             r#"
@@ -41,7 +37,7 @@ impl ApprovalRepository {
             "#,
             title,
             requester_id,
-            Json(form_data) as Json<serde_json::Value>, // 명시적 캐스팅
+            Json(form_data) as Json<serde_json::Value>,
             Json(flow_process) as Json<FlowProcess>
         )
         .fetch_one(&self.pool)
@@ -51,9 +47,6 @@ impl ApprovalRepository {
     }
 
     pub async fn find_by_id(&self, id: Uuid) -> Result<Option<ApprovalRequest>> {
-        // [Rust Guide]
-        // query_as!: 컴파일 타임에 SQL 문법과 타입 정합성을 검사해주는 매크로입니다.
-        // 런타임 에러를 획기적으로 줄여줍니다.
         let request = sqlx::query_as!(
             ApprovalRequest,
             r#"
@@ -76,6 +69,7 @@ impl ApprovalRepository {
 
         Ok(request)
     }
+
     pub async fn update(&self, request: ApprovalRequest) -> Result<ApprovalRequest> {
         let updated_request = sqlx::query_as!(
             ApprovalRequest,
@@ -127,5 +121,46 @@ impl ApprovalRepository {
         .await?;
 
         Ok(requests)
+    }
+
+    pub async fn add_log(
+        &self,
+        approval_id: Uuid,
+        actor_id: Uuid,
+        action_type: String,
+        content: Option<String>,
+    ) -> Result<ApprovalLog> {
+        let log = sqlx::query_as!(
+            ApprovalLog,
+            r#"
+            INSERT INTO approval_logs (approval_id, actor_id, action_type, content)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+            "#,
+            approval_id,
+            actor_id,
+            action_type,
+            content
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(log)
+    }
+
+    pub async fn get_logs(&self, approval_id: Uuid) -> Result<Vec<ApprovalLog>> {
+        let logs = sqlx::query_as!(
+            ApprovalLog,
+            r#"
+            SELECT * FROM approval_logs
+            WHERE approval_id = $1
+            ORDER BY created_at ASC
+            "#,
+            approval_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(logs)
     }
 }

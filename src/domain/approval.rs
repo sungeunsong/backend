@@ -7,7 +7,7 @@ use uuid::Uuid;
 // JSONB 데이터를 다루기 위한 구조체입니다.
 // Serialize, Deserialize: Rust 구조체 <-> JSON 변환을 위해 필요합니다.
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")] // JSON: "approve", "reject"
 pub enum ApprovalAction {
     Approve,
@@ -95,4 +95,14 @@ pub struct ApprovalRequest {
 
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ApprovalLog {
+    pub id: Uuid,
+    pub approval_id: Uuid,
+    pub actor_id: Uuid,
+    pub action_type: String,
+    pub content: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
 }

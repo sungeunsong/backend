@@ -4,7 +4,10 @@ use axum::{
 };
 use backend::{
     establish_connection,
-    handlers::approval_handler::{create_approval, get_approval, list_approvals, process_approval},
+    handlers::approval_handler::{
+        add_comment, approve_request, create_approval, get_approval, get_logs, list_approvals,
+        reject_request,
+    },
 };
 use dotenvy::dotenv;
 use std::env;
@@ -33,7 +36,10 @@ async fn main() {
         // Approval Routes
         .route("/approvals", post(create_approval).get(list_approvals))
         .route("/approvals/{id}", get(get_approval))
-        .route("/approvals/{id}/action", post(process_approval))
+        .route("/approvals/{id}/approve", post(approve_request))
+        .route("/approvals/{id}/reject", post(reject_request))
+        .route("/approvals/{id}/comments", post(add_comment))
+        .route("/approvals/{id}/logs", get(get_logs)) // Added logs endpoint
         // Template Routes
         .route(
             "/templates",
@@ -52,10 +58,10 @@ async fn main() {
         .with_state(pool);
 
     // 4. 서버 시작
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3001)); // Listen on all interfaces
     println!("🚀 Server listening on {}", addr);
     let listener = TcpListener::bind(addr).await.unwrap();
-    println!("Routes initialized. Try POST/GET /approvals");
+    println!("Routes initialized.");
     axum::serve(listener, app).await.unwrap();
 }
 
