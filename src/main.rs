@@ -4,7 +4,7 @@ use axum::{
 };
 use backend::{
     establish_connection,
-    handlers::approval_handler::{create_approval, get_approval},
+    handlers::approval_handler::{create_approval, get_approval, list_approvals, process_approval},
 };
 use dotenvy::dotenv;
 use std::env;
@@ -25,8 +25,9 @@ async fn main() {
     // 3. Router 설정
     let app = Router::new()
         .route("/", get(root))
-        .route("/approvals", post(create_approval))
-        .route("/approvals/{id}", get(get_approval))
+        .route("/approvals", post(create_approval).get(list_approvals))
+        .route("/approvals/:id", get(get_approval))
+        .route("/approvals/:id/action", post(process_approval))
         .with_state(pool);
 
     // 4. 서버 시작

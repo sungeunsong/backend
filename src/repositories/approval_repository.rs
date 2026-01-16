@@ -76,4 +76,56 @@ impl ApprovalRepository {
 
         Ok(request)
     }
+    pub async fn update(&self, request: ApprovalRequest) -> Result<ApprovalRequest> {
+        let updated_request = sqlx::query_as!(
+            ApprovalRequest,
+            r#"
+            UPDATE pxm_approval_requests
+            SET
+                status = $1,
+                flow_process = $2,
+                updated_at = NOW()
+            WHERE id = $3
+            RETURNING
+                id,
+                title,
+                requester_id,
+                status,
+                form_data as "form_data: Json<serde_json::Value>",
+                flow_process as "flow_process: Json<FlowProcess>",
+                created_at,
+                updated_at
+            "#,
+            request.status,
+            request.flow_process as Json<FlowProcess>,
+            request.id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(updated_request)
+    }
+
+    pub async fn find_all(&self) -> Result<Vec<ApprovalRequest>> {
+        let requests = sqlx::query_as!(
+            ApprovalRequest,
+            r#"
+            SELECT
+                id,
+                title,
+                requester_id,
+                status,
+                form_data as "form_data: Json<serde_json::Value>",
+                flow_process as "flow_process: Json<FlowProcess>",
+                created_at,
+                updated_at
+            FROM pxm_approval_requests
+            ORDER BY created_at DESC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(requests)
+    }
 }

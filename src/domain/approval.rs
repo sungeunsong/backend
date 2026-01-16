@@ -6,10 +6,65 @@ use uuid::Uuid;
 // [Rust Guide]
 // JSONB 데이터를 다루기 위한 구조체입니다.
 // Serialize, Deserialize: Rust 구조체 <-> JSON 변환을 위해 필요합니다.
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")] // JSON: "approve", "reject"
+pub enum ApprovalAction {
+    Approve,
+    Reject,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FlowProcess {
     pub current_step: i32,
     pub steps: Vec<ApprovalStep>,
+}
+
+impl FlowProcess {
+    pub fn handle_action(
+        &mut self,
+        action: ApprovalAction,
+        approver_id: Uuid,
+    ) -> Result<String, String> {
+        // 1. 현재 단계 찾기
+        // get_mut: 가변 참조를 가져옵니다. (데이터 수정 권한)
+        let step_idx = (self.current_step - 1) as usize;
+        let step = self
+            .steps
+            .get_mut(step_idx)
+            .ok_or("Current step not found")?;
+
+        // 2. 권한 확인 (본인 차례인지)
+        if step.approver_id != approver_id {
+            return Err("Not your turn to approve".to_string());
+        }
+
+        // 3. 이미 처리되었는지 확인
+        if step.status != "pending" {
+            return Err("Already processed".to_string());
+        }
+
+        // 4. 상태 업데이트
+        match action {
+            ApprovalAction::Approve => {
+                step.status = "approved".to_string();
+                step.timestamp = Some(Utc::now());
+
+                // 다음 단계로 이동 확인
+                if self.current_step < self.steps.len() as i32 {
+                    self.current_step += 1;
+                    return Ok("moved_to_next_step".to_string());
+                } else {
+                    return Ok("completed".to_string());
+                }
+            }
+            ApprovalAction::Reject => {
+                step.status = "rejected".to_string();
+                step.timestamp = Some(Utc::now());
+                return Ok("rejected".to_string());
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

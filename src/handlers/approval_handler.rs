@@ -1,4 +1,7 @@
-use crate::{domain::approval::FlowProcess, repositories::approval_repository::ApprovalRepository};
+use crate::{
+    domain::approval::{ApprovalAction, FlowProcess},
+    repositories::approval_repository::ApprovalRepository,
+};
 use axum::{
     Json,
     extract::{Path, State},
@@ -63,6 +66,72 @@ pub async fn get_approval(
         Ok(None) => Err(StatusCode::NOT_FOUND),
         Err(e) => {
             eprintln!("Failed to get approval request: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ProcessApprovalDto {
+    pub approver_id: Uuid,
+    pub action: ApprovalAction,
+}
+
+pub async fn process_approval(
+    Path(id): Path<Uuid>,
+    State(pool): State<PgPool>,
+    Json(payload): Json<ProcessApprovalDto>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let repo = ApprovalRepository::new(pool);
+
+    // 1. Fetch
+    let mut request = match repo.find_by_id(id).await {
+        Ok(Some(req)) => req,
+        Ok(None) => return Err((StatusCode::NOT_FOUND, "Request not found".to_string())),
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("DB Error: {:?}", e),
+            ));
+        }
+    };
+
+    // 2. Logic
+    match request
+        .flow_process
+        .0
+        .handle_action(payload.action, payload.approver_id)
+    {
+        Ok(result) => {
+            if result == "completed" {
+                request.status = "approved".to_string();
+            } else if result == "rejected" {
+                request.status = "rejected".to_string();
+            }
+            // "moved_to_next_step" -> status remains "pending"
+        }
+        Err(e) => return Err((StatusCode::BAD_REQUEST, e)),
+    }
+
+    // 3. Update
+    match repo.update(request).await {
+        Ok(updated) => Ok(Json(serde_json::json!(updated))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Update failed: {:?}", e),
+        )),
+    }
+}
+
+pub async fn list_approvals(
+    State(pool): State<PgPool>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let repo = ApprovalRepository::new(pool);
+
+    match repo.find_all().await {
+        Ok(requests) => Ok(Json(serde_json::json!(requests))),
+        Err(e) => {
+            eprintln!("Failed to list approvals: {:?}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
