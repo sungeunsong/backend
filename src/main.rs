@@ -33,6 +33,17 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(root))
+        // Auth Routes
+        .route(
+            "/auth/register",
+            post(backend::handlers::auth_handler::register),
+        )
+        .route("/auth/login", post(backend::handlers::auth_handler::login))
+        // Org Routes
+        .route(
+            "/org/my-manager/{user_id}",
+            get(backend::handlers::org_handler::get_my_manager),
+        )
         // Approval Routes
         .route("/approvals", post(create_approval).get(list_approvals))
         .route("/approvals/{id}", get(get_approval))
