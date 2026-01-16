@@ -26,8 +26,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(root))
         .route("/approvals", post(create_approval).get(list_approvals))
-        .route("/approvals/:id", get(get_approval))
-        .route("/approvals/:id/action", post(process_approval))
+        .route("/approvals/{id}", get(get_approval))
+        .route("/approvals/{id}/action", post(process_approval))
         .with_state(pool);
 
     // 4. 서버 시작
