@@ -1,4 +1,4 @@
-use crate::repositories::user_repository::UserRepository;
+// use crate::repositories::user_repository::UserRepository;
 use axum::{
     Json,
     extract::{Path, State},
@@ -56,4 +56,38 @@ pub async fn get_my_manager(
         })),
         None => Err(StatusCode::NOT_FOUND), // User has no department or department has no manager
     }
+}
+
+// Simple User Search/List
+pub async fn list_users(
+    State(pool): State<PgPool>,
+) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
+    let users = sqlx::query!(
+        r#"
+        SELECT id, full_name, email, position 
+        FROM users 
+        WHERE status = 'ACTIVE' 
+        ORDER BY full_name ASC
+        "#
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        eprintln!("Failed to list users: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let dtos = users
+        .into_iter()
+        .map(|u| {
+            serde_json::json!({
+                "id": u.id,
+                "full_name": u.full_name,
+                "email": u.email,
+                "position": u.position
+            })
+        })
+        .collect();
+
+    Ok(Json(dtos))
 }

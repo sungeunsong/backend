@@ -4,7 +4,7 @@ use crate::{
 };
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
 };
 use serde::Deserialize;
@@ -14,13 +14,14 @@ use uuid::Uuid;
 #[derive(Deserialize)]
 pub struct CreateApprovalRequestDto {
     pub title: String,
-    pub requester_id: Uuid,
+    // requester_id is removed from DTO, will use Auth
     pub form_data: serde_json::Value,
     pub flow_process: FlowProcess,
 }
 
 pub async fn create_approval(
     State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
     Json(payload): Json<CreateApprovalRequestDto>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let repo = ApprovalRepository::new(pool);
@@ -28,7 +29,7 @@ pub async fn create_approval(
     let request = repo
         .create(
             payload.title,
-            payload.requester_id,
+            user_id, // Use authenticated user
             payload.form_data,
             payload.flow_process,
         )
@@ -40,12 +41,7 @@ pub async fn create_approval(
 
     // Log creation
     let _ = repo
-        .add_log(
-            request.id,
-            request.requester_id,
-            "CREATED".to_string(),
-            None,
-        )
+        .add_log(request.id, user_id, "CREATED".to_string(), None)
         .await;
 
     Ok(Json(serde_json::json!(request)))
@@ -54,17 +50,13 @@ pub async fn create_approval(
 pub async fn get_approval(
     Path(id): Path<Uuid>,
     State(pool): State<PgPool>,
+    Extension(_user_id): Extension<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let repo = ApprovalRepository::new(pool);
 
     match repo.find_by_id(id).await {
         Ok(Some(request)) => {
-            // Include logs? For now just request. We can fetch logs separately or combine.
-            // Let's attach logs to the response if we change the response structure,
-            // but for now let's stick to returning Request and let Frontend fetch logs separately
-            // OR update Frontend to Expect everything.
-            // Frontend expects `flow_process`, `form_data`.
-            // Let's keep it simple.
+            // TODO: Use user_id to filter permissions if needed (e.g. only involved people can view)
             Ok(Json(serde_json::json!(request)))
         }
         Ok(None) => Err(StatusCode::NOT_FOUND),
@@ -79,8 +71,9 @@ pub async fn get_approval(
 pub async fn approve_request(
     Path(id): Path<Uuid>,
     State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    process_action_internal(id, ApprovalAction::Approve, None, pool).await
+    process_action_internal(id, ApprovalAction::Approve, None, pool, user_id).await
 }
 
 // Handler for REJECT
@@ -92,9 +85,17 @@ pub struct RejectDto {
 pub async fn reject_request(
     Path(id): Path<Uuid>,
     State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
     Json(payload): Json<RejectDto>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    process_action_internal(id, ApprovalAction::Reject, Some(payload.reason), pool).await
+    process_action_internal(
+        id,
+        ApprovalAction::Reject,
+        Some(payload.reason),
+        pool,
+        user_id,
+    )
+    .await
 }
 
 // Internal logic shared by both
@@ -103,6 +104,7 @@ async fn process_action_internal(
     action: ApprovalAction,
     reason: Option<String>,
     pool: PgPool,
+    actor_id: Uuid,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let repo = ApprovalRepository::new(pool);
 
@@ -113,18 +115,25 @@ async fn process_action_internal(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Request not found".to_string()))?;
 
-    // Auto-detect approver (First pending step)
+    // Validate that actor_id matches the current approver
     let current_step_idx = (request.flow_process.0.current_step - 1) as usize;
-    let approver_id = match request.flow_process.0.steps.get(current_step_idx) {
+    let expected_approver_id = match request.flow_process.0.steps.get(current_step_idx) {
         Some(step) => step.approver_id,
         None => return Err((StatusCode::BAD_REQUEST, "Invalid step state".to_string())),
     };
+
+    if expected_approver_id != actor_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You are not the current approver".to_string(),
+        ));
+    }
 
     // 2. Handle Action via Domain Logic
     let result_msg = request
         .flow_process
         .0
-        .handle_action(action, approver_id)
+        .handle_action(action, expected_approver_id)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
     if result_msg == "completed" {
@@ -145,7 +154,7 @@ async fn process_action_internal(
         ApprovalAction::Reject => "REJECTED",
     };
     let _ = repo
-        .add_log(id, approver_id, log_action.to_string(), reason)
+        .add_log(id, actor_id, log_action.to_string(), reason)
         .await;
 
     Ok(Json(serde_json::json!(updated)))
@@ -159,15 +168,13 @@ pub struct CommentDto {
 pub async fn add_comment(
     Path(id): Path<Uuid>,
     State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
     Json(payload): Json<CommentDto>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let repo = ApprovalRepository::new(pool);
 
-    // Fetch to get 'who' acts? Simulating current user is tricky without auth.
-    // Let's assume the requester or current approver is commenting?
-    // For now, use a fixed System ID or Requester ID if possible.
-    // Let's fetch request to get requester_id as fallback actor.
-    let request = repo
+    // Ensure request exists
+    let _request = repo
         .find_by_id(id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -177,7 +184,7 @@ pub async fn add_comment(
     let log = repo
         .add_log(
             id,
-            request.requester_id,
+            user_id, // Use authenticated user
             "COMMENT".to_string(),
             Some(payload.content),
         )
@@ -203,9 +210,13 @@ pub async fn get_logs(
 
 pub async fn list_approvals(
     State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let repo = ApprovalRepository::new(pool);
 
+    // TODO: Filter by user_id (My Inbox)
+    // For now, list all but we should filter where user is requester OR approver
+    let _ = user_id;
     match repo.find_all().await {
         Ok(requests) => Ok(Json(serde_json::json!(requests))),
         Err(e) => {

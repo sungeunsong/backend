@@ -1,5 +1,5 @@
 use crate::{
-    domain::{approval::FlowProcess, template::CreateTemplateDto},
+    domain::template::CreateTemplateDto,
     repositories::{
         approval_repository::ApprovalRepository, template_repository::TemplateRepository,
     },

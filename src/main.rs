@@ -31,18 +31,16 @@ async fn main() {
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any);
 
-    let app = Router::new()
-        .route("/", get(root))
-        // Auth Routes
-        .route(
-            "/auth/register",
-            post(backend::handlers::auth_handler::register),
-        )
-        .route("/auth/login", post(backend::handlers::auth_handler::login))
+    // Protected Routes (Require Auth)
+    let protected_routes = Router::new()
         // Org Routes
         .route(
             "/org/my-manager/{user_id}",
             get(backend::handlers::org_handler::get_my_manager),
+        )
+        .route(
+            "/org/users",
+            get(backend::handlers::org_handler::list_users),
         )
         // Approval Routes
         .route("/approvals", post(create_approval).get(list_approvals))
@@ -50,7 +48,7 @@ async fn main() {
         .route("/approvals/{id}/approve", post(approve_request))
         .route("/approvals/{id}/reject", post(reject_request))
         .route("/approvals/{id}/comments", post(add_comment))
-        .route("/approvals/{id}/logs", get(get_logs)) // Added logs endpoint
+        .route("/approvals/{id}/logs", get(get_logs))
         // Template Routes
         .route(
             "/templates",
@@ -65,7 +63,22 @@ async fn main() {
             "/approvals/from-template/{template_id}",
             post(backend::handlers::template_handler::create_approval_from_template),
         )
-        .layer(cors) // CORS 미들웨어 추가
+        .layer(axum::middleware::from_fn_with_state(
+            pool.clone(),
+            backend::utils::middleware::auth_middleware,
+        ));
+
+    let app = Router::new()
+        .route("/", get(root))
+        // Auth Routes (Public)
+        .route(
+            "/auth/register",
+            post(backend::handlers::auth_handler::register),
+        )
+        .route("/auth/login", post(backend::handlers::auth_handler::login))
+        // Merge Protected Routes
+        .merge(protected_routes)
+        .layer(cors)
         .with_state(pool);
 
     // 4. 서버 시작
